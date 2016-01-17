@@ -51,7 +51,7 @@ int cur_steering = 0;
 long last_dist;
 long last_dist_check = millis();
 
-int last_consumo;
+int consumo;
 
 bool strategyLock = false;
 char strategy = 'Z'; // current strategy
@@ -110,6 +110,10 @@ void loop() {
   long dist;
   if ((millis() - last_dist_check) > 100) {
     dist = checkDistanceNew();
+    if (dist==0){
+      dist = checkDistanceNew();
+    }
+    consumo = analogRead(A0);
     last_dist_check = millis();
   } else  {
     dist = last_dist;
@@ -121,7 +125,10 @@ void loop() {
   checkManualStrategy();
 
   if (strategyLock == false) {
-    if (dist >= 100) { // current direction is good
+    if (consumo > 100 ) {
+      bluetooth.println("consumo elevato");
+      brakeAndBack();
+    } else if (dist >= 100) { // current direction is good
       goAhead();
     }
     else if (dist < 20) { // emergency brake
@@ -277,11 +284,11 @@ void brakeAndBack() {
     startStrategyState('A');
     return;
   }
-  bluetooth.println(strategyState);
+  //bluetooth.println(strategyState);
   unsigned long t = millis();
   if (strategyState == 'A') { // braking
     if ((t - strategyStateStart) < TIME_TO_BRAKE) { // let time to brake
-      bluetooth.println("let time to brake ");
+      //bluetooth.println("let time to brake ");
       return;
     }
     startStrategyState('B');
@@ -296,7 +303,7 @@ void brakeAndBack() {
   }
   if (strategyState == 'B') { // steering back
     if ((t - strategyStateStart) < 2000) { // let time to steer back
-      bluetooth.println("let time to steer back");
+      //bluetooth.println("let time to steer back");
       return;
     }
     startStrategyState('C');
@@ -304,7 +311,7 @@ void brakeAndBack() {
   }
   if (strategyState == 'C') { // steering forward
     if ((t - strategyStateStart) < TIME_TO_BRAKE) { // let time to brake
-      bluetooth.println("let time to brake ");
+      //bluetooth.println("let time to brake ");
       return;
     }
     startStrategyState('D');
@@ -368,14 +375,14 @@ void steer(int val) { // steer angle from -90 to +90
   }
   steering_servo.write(val + 90 + STEER_TRIM); // servo need angle from 0 to 180
   cur_steering = val;
-  bluetooth.print("Steering: ");
-  bluetooth.println(val);
+  //bluetooth.print("Steering: ");
+  //bluetooth.println(val);
 }
 
 void accelerate(int val) {
   target_speed_A = val; //actually do nothing, just set target speed, motorLoop() will do the work
-  bluetooth.print("New target motor speed: ");
-  bluetooth.println(val);
+  //bluetooth.print("New target motor speed: ");
+  //bluetooth.println(val);
 }
 
 void motorLoop() {
@@ -387,11 +394,11 @@ void motorLoop() {
     digitalWrite(A_motor_brake, 1);
     speed_A = 0;
     brake_A = true;
-    bluetooth.println("brake");
+    //bluetooth.println("brake");
   } else if (brake_A) { // if not braking, release the brake
     brake_A = false;
     digitalWrite(A_motor_brake, 0);
-    bluetooth.println("brake release");
+    //bluetooth.println("brake release");
   }
   if (target_speed_A < MIN_SPEED) {
     target_speed_A = 0;
@@ -413,17 +420,12 @@ void motorLoop() {
       last_speed_change = millis();
     }
   }
-  bluetooth.print("motor speed: ");
-  bluetooth.println(speed_A);
-  bluetooth.print("motor speed map: ");
-  bluetooth.println(map(speed_A, 0, 100, 0, 255));
-  
-  int consumo = analogRead(A0);
-  if (consumo != last_consumo) {
-    bluetooth.print("consumo: ");
-    bluetooth.println(consumo);
-    last_consumo = consumo;
-  }
+  //bluetooth.print("motor speed: ");
+  //bluetooth.println(speed_A);
+  //bluetooth.print("motor speed map: ");
+  //bluetooth.println(map(speed_A, 0, 100, 0, 255));
+
+
 }
 
 long testDistance() {
@@ -437,8 +439,7 @@ long testDistance() {
   long r;
   long duration = pulseIn(Dist_echo, HIGH, 38001);
   delay(10);
-  if ( duration > 38000 ) r = -1; // out of range
-  else r = 0.034 * duration / 2;
+  r = 0.034 * duration / 2;
   return r;
 }
 

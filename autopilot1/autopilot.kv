@@ -1,0 +1,95 @@
+#:kivy 1.0.9
+#:import sin math.sin
+#:import cos math.cos
+#:import radians math.radians
+
+<RadarPulse>:  
+    canvas:
+        Color:
+            rgb: 1, 0, 0
+        Line:
+            width: 2.0
+            circle: (self.center_x, self.center_y, self.distance, self.angle - 1, self.angle + 1)
+            
+<RadarGrid>:
+    canvas:
+        Color:
+            rgb: 1, 1, 1
+        Ellipse:
+            angle_start: -90
+            angle_end: 90
+            size: root.width, root.width
+            pos: 0, -root.width/2 + 100
+        Color:
+            rgb: 0, 1, 0
+        Line:
+            width: 1.0
+            circle: (self.center_x,  100, root.width/2/4*3, -90, 90)
+        Line:
+            width: 1.0
+            circle: (self.center_x,  100, root.width/2/4*2, -90, 90)
+        Line:
+            width: 1.0
+            circle: (self.center_x,  100, root.width/2/4*1, -90, 90)
+        Line:
+            width: 1.0
+            points: (self.center_x,  100, self.center_x, root.width/2 + 100)
+        Line:
+            width: 1.0
+            points: (self.center_x,  100, self.center_x + root.width/2 * sin(radians(45)), 100 + root.width/2 * cos(radians(45)))
+        Line:
+            width: 1.0
+            points: (self.center_x,  100, self.center_x + root.width/2 * sin(radians(-45)), 100 + root.width/2 * cos(radians(-45)))
+        Line:
+            width: 1.0
+            points: (self.center_x,  100, self.center_x + root.width/2 * sin(radians(70)), 100 + root.width/2 * cos(radians(70)))
+        Line:
+            width: 1.0
+            points: (self.center_x,  100, self.center_x + root.width/2 * sin(radians(-70)), 100 + root.width/2 * cos(radians(-70)))
+            
+<RadarPage>:
+    lbl_angle: left
+    lbl_dist: right
+    lbl_port: port
+    radar_grid: grid
+    lbl_log: log
+        
+    Label:
+        id: left
+        font_size: 70  
+        center_x: root.width / 4
+        top: root.top - 50
+        text: "0"
+        
+    Label:
+        id: right
+        font_size: 70  
+        center_x: root.width * 3 / 4
+        top: root.top - 50
+        text: "0"
+        
+    Label:
+        id: port
+        font_size: 15  
+        left: 20
+        bottom: 5
+        text: "0"
+        size: root.width / 10 * 2, 90
+        text_size: self.size
+        halign: 'left'
+        valign: 'bottom'
+
+    Label:
+        id: log
+        font_size: 15  
+        center_x: root.width / 2
+        bottom: 5
+        size: root.width / 10 * 5, 90
+        text: "0"
+        text_size: self.size
+        halign: 'left'
+        valign: 'top'
+        
+    RadarGrid:
+        id: grid
+        size: root.width, root.width

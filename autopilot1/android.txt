@@ -1,0 +1,4 @@
+title=Kivy Arduino Autopilot
+author=Francesco Cavazzana
+orientation=landscape
+fullscreen=1
