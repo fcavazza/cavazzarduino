@@ -31,47 +31,8 @@ MAX_SENSOR_DISTANCE = 200
 
 
 
-class ArduinoData(EventDispatcher):
-    distance = NumericProperty(0)
-    cur_steering = NumericProperty(0)
-    dir_A = NumericProperty(1)
-    brake_A = NumericProperty(0)
-    speed_A = NumericProperty(0)
-    target_speed_A = NumericProperty(70)
-    current = NumericProperty(0)
-    strategyLock = StringProperty('-')
-    strategy = StringProperty('G')
-    strategyTime = NumericProperty(0)
-    strategyStep = StringProperty('-')
-    strategyStepTime = NumericProperty(0)
-    lastCommCicles = NumericProperty(0)
-    lastCommTime = NumericProperty(0)
-    auto = StringProperty('normal')
-    
-    @property
-    def auto_mode(self):
-        return self.auto == 'down'
-    
-    def readArduinoData(self, datastring):
-        d = datastring.split(';')
-        millis = int(d[0])
-        self.distance = int(d[1])
-        self.cur_steering = int(d[2])
-        self.dir_A = int(d[3])
-        self.brake_A = int(d[4])
-        self.speed_A = int(d[5])
-        self.target_speed_A = int(d[6])
-        self.current = float(d[7])
-        self.strategyLock = 'y' if int(d[8]) else '-'
-        self.strategy = d[9]
-        strategyStart = int(d[10])
-        self.strategyTime = millis - strategyStart
-        self.strategyStep = d[11]
-        strategyStepStart = int(d[12])
-        self.strategyStepTime = millis - strategyStepStart
-        self.lastCommCicles = int(d[13])
-        lastCommTime = int(d[14])
-        self.lastCommTime = millis - lastCommTime
+#class ArduinoData(EventDispatcher):
+#    pass
     
     
 class RadarPulse(Widget):
@@ -140,14 +101,30 @@ class AutopilotPage(BoxLayout):
     leftCommands = ObjectProperty(None)
 
 class AutopilotApp(App):
-    data = ObjectProperty(ArduinoData(), rebind=True)
+    #data = ObjectProperty(ArduinoData(), rebind=True)
+    distance = NumericProperty(0)
+    cur_steering = NumericProperty(0)
+    dir_A = NumericProperty(1)
+    brake_A = NumericProperty(0)
+    speed_A = NumericProperty(0)
+    target_speed_A = NumericProperty(70)
+    current = NumericProperty(0)
+    strategyLock = StringProperty('-')
+    strategy = StringProperty('G')
+    strategyTime = NumericProperty(0)
+    strategyStep = StringProperty('-')
+    strategyStepTime = NumericProperty(0)
+    lastCommCicles = NumericProperty(0)
+    lastCommTime = NumericProperty(0)
+    auto = StringProperty('normal')
+    loglines_text = StringProperty()
     
     def __init__(self, *args, **kwargs):
         super(AutopilotApp, self).__init__(*args, **kwargs)
         self.port = None
         self.serial = None
         self.lastConnectionAttempt = 0
-        self.loglines = deque(maxlen=5)
+        self.loglines = deque(maxlen=12)
         self.segno = 1
         
     def build(self):
@@ -156,7 +133,32 @@ class AutopilotApp(App):
         self.connectArduino()
         return radar
         
+    @property
+    def auto_mode(self):
+        return self.auto == 'down'
     
+    def readArduinoData(self, datastring):
+        d = datastring.split(';')
+        millis = int(d[0])
+        self.distance = int(d[1])
+        if self.auto_mode:
+            self.cur_steering = int(d[2])
+            self.dir_A = int(d[3])
+            self.brake_A = int(d[4])
+            self.target_speed_A = int(d[6])
+        self.speed_A = int(d[5])
+        self.current = float(d[7])
+        self.strategyLock = 'y' if int(d[8]) else '-'
+        self.strategy = d[9]
+        strategyStart = int(d[10])
+        self.strategyTime = millis - strategyStart
+        self.strategyStep = d[11]
+        strategyStepStart = int(d[12])
+        self.strategyStepTime = millis - strategyStepStart
+        self.lastCommCicles = int(d[13])
+        lastCommTime = int(d[14])
+        self.lastCommTime = millis - lastCommTime
+        
     def connectArduino(self):
         if time.time() - self.lastConnectionAttempt < 1: return self.port
         self.lastConnectionAttempt = time.time()
@@ -186,14 +188,14 @@ class AutopilotApp(App):
             self.connectArduino()
             return
         line = self.serial.readline()
+        print "letto: " + line
         if not line:
             return
         if line.startswith('#'):
             self.log(line)
             return
-        print line
         if True:
-            self.data.readArduinoData(line)
+            self.readArduinoData(line)
         #except:
         #    self.log('** transmission error **')
         #angle, dist = [int(v) for v in line.split(';')]
@@ -201,27 +203,30 @@ class AutopilotApp(App):
 
     def writeArduino(self):
         if not self.serial: return
-        if self.data.auto_mode:
+        if self.auto_mode:
             self.serial.write('A')
         else:
-            self.serial.write('M%i%20i%20i%i\n' % (self.data.dir_A, 
-            		self.data.speed_A, self.data.cur_steering, self.data.brake_A))
+            cmd = str('M%i%03i%+03i%i\n' % (self.dir_A, 
+                    self.target_speed_A, self.cur_steering, self.brake_A))
+            print cmd
+            self.serial.write(cmd)
 
 
     def update(self, dt):
         self.readArduino()
         self.writeArduino()
         
-        #if self.data.target_speed_A == 100:
+        #if self.target_speed_A == 100:
         #    self.segno = -1
-        #elif self.data.target_speed_A == 0:
+        #elif self.target_speed_A == 0:
         #    self.segno = 1
-        #self.data.target_speed_A += (1 * self.segno)
-        #self.data.cur_steering += (1 * self.segno)
+        #self.target_speed_A += (1 * self.segno)
+        #self.cur_steering += (1 * self.segno)
         
     def log(self, txt):
         print txt
         self.loglines.append(str(txt))
+        self.loglines_text = '\n'.join(self.loglines)
         #self.leftCommands.lbl_log.text = '\n'.join(self.loglines)
 
 if __name__ == '__main__':

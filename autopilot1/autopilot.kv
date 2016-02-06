@@ -23,10 +23,10 @@
             text: 'D'
         Label:
             size_hint: 1, 0.1
-            text: '%i %%' % app.data.target_speed_A
+            text: '%i %%' % app.target_speed_A
         Label:
             size_hint: 1, 0.1
-            text: '%i %%' % app.data.speed_A
+            text: '%i %%' % app.speed_A
 
         Slider:
             id: slider_motor_dir
@@ -34,18 +34,21 @@
             max: 1
             min: 0
             step: 2
-            value: 1
+            value: app.dir_A
+            on_value: app.dir_A = args[1]
         Slider:
             id: slider_motor_target
             orientation: 'vertical'
             max: 100
-            value: app.data.target_speed_A
+            value: app.target_speed_A
+            on_value: app.target_speed_A = args[1]
+
         Slider:
             id: slider_motor_actual
             orientation: 'vertical'
             disabled: True
             max: 100
-            value: app.data.speed_A
+            value: app.speed_A
         
         Label:
             size_hint: 1, 0.1
@@ -63,7 +66,7 @@
         id: log
         size_hint: 1, 1
         font_size: 15  
-        text: '\n'.join(app.loglines)
+        text: app.loglines_text
         text_size: self.size
         
 
@@ -76,20 +79,23 @@
         Button:
             size_hint: 0.5, 1
             text: "Brake"
-            state: "down" if app.data.brake_A else "normal"
+            state: "down" if app.brake_A else "normal"
+            on_state: app.brake_A = args[1]
         ToggleButton:
             size_hint: 0.5, 1
             text: "Auto"
-            state: app.data.auto
+            state: app.auto
+            on_state: app.auto = args[1]
         Label:
             size_hint: 0.1, 1
-            text: '%i °' % app.data.cur_steering
+            text: '%i °' % app.cur_steering
         Slider:
             id: slider_steer
             orientation: 'horizontal'
             max: 90
             min: -90
-            value: app.data.cur_steering
+            value: app.cur_steering
+            on_value: app.cur_steering = args[1]
             size_hint: 1, 1
 
 
@@ -149,25 +155,25 @@
             size_hint: 1, 1
             cols: 2
             Label:
-                text: 'Strategy: %s' % app.data.strategy
+                text: 'Strategy: %s' % app.strategy
             Label:
-                text: 'time: %i' % app.data.strategyTime
+                text: 'time: %i' % app.strategyTime
             Label:
-                text: 'Strategy Step: %s' % app.data.strategyStep
+                text: 'Strategy Step: %s' % app.strategyStep
             Label:
-                text: 'time: %i' % app.data.strategyStepTime
+                text: 'time: %i' % app.strategyStepTime
             Label:
-                text: 'Distance: %s' % app.data.distance
+                text: 'Distance: %s' % app.distance
             Label:
-                text: 'Strategy Lock: %s' % app.data.strategyLock
+                text: 'Strategy Lock: %s' % app.strategyLock
             Label:
-                text: 'Brake: %i' % app.data.brake_A
+                text: 'Brake: %i' % app.brake_A
             Label:
-                text: 'Current: %s' % app.data.current
+                text: 'Current: %s' % app.current
             Label:
-                text: 'Last Comm Cicles: %s' % app.data.lastCommCicles
+                text: 'Last Comm Cicles: %s' % app.lastCommCicles
             Label:
-                text: 'Last Comm time: %s' % app.data.lastCommTime
+                text: 'Last Comm time: %s' % app.lastCommTime
         RadarGrid:
             id: radarGrid
             size_hint: 1, 1
