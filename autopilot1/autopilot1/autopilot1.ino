@@ -2,7 +2,7 @@
 #include <NewPing.h>
 #include <SoftwareSerial.h>
 
-#define DEBUG_NO_MOTOR false
+#define DEBUG_NO_MOTOR true
 
 #define A_motor_pwm 3
 #define A_motor_brake 9
@@ -39,7 +39,7 @@
 #define BT_TX A4
 #define TIME_UNIQUE_MANEUVER 5000 //if less than 5 seconds from last maneuver, it is an unique maneuver
 
-#define BT_COMM_DELAY 50 // bluetooth communication frequency
+#define BT_COMM_DELAY 10 // bluetooth communication frequency
 
 #define DIST_HALF_STEER 100
 #define DIST_FULL_STEER 100
@@ -83,7 +83,7 @@ SoftwareSerial bluetooth(BT_RX, BT_TX);
 Servo steering_servo;
 NewPing sonar(Dist_trig, Dist_echo, max_distance_cm);
 
-String stringOne;
+String manualCommand;
 String debugLog;
 String btLog;
 
@@ -119,6 +119,7 @@ void setup() {
 
 void loop() {
   debugLog = String();
+  //debugLog = debugLog + String("manualCommand 3: " + manualCommand + "\n");
   lastCommCicles += 1;
   long dist;
   unsigned long ms = millis();
@@ -126,8 +127,8 @@ void loop() {
   if ((millis() - last_dist_check) > 100) {
     dist = checkDistanceNew();
 
-    for (int i=9; i > 0; i -= 1) {
-      current[i] = current[i-1];
+    for (int i = 9; i > 0; i -= 1) {
+      current[i] = current[i - 1];
     }
     current[0] = analogRead(A0) * CURRENT_TO_MA;
     last_dist_check = millis();
@@ -135,15 +136,16 @@ void loop() {
     dist = last_dist;
   }
   debugLog = debugLog + "dist_check: " + (millis() - ms) + "\n";
-  
+
   int delta_dist = dist - last_dist;
   last_dist = dist;
 
-  ms = millis();
-  checkManualStrategy();
-  debugLog = debugLog + "checkManualStrategy: " + (millis() - ms) + "\n";
+  //ms = millis();
 
-  ms = millis();
+  checkManualStrategy();
+  //debugLog = debugLog + "checkManualStrategy: " + (millis() - ms) + "\n";
+
+  //ms = millis();
   if (strategyLock == false) {
     if (current[0] > MAX_TORQUE_MA) {
       btLog = btLog + "# high current\n";
@@ -188,50 +190,67 @@ void loop() {
         break;
     }
   }
-  debugLog = debugLog + "checkAutoStrategy: " + (millis() - ms) + "\n";
+  //debugLog = debugLog + "checkAutoStrategy: " + (millis() - ms) + "\n";
 
-  ms = millis();
+  //ms = millis();
   motorLoop();
-  debugLog = debugLog + "motorLoop: " + (millis() - ms) + "\n";
+  //debugLog = debugLog + "motorLoop: " + (millis() - ms) + "\n";
 
   ms = millis();
-  communicate();
+  manualCommand = communicate();
   debugLog = debugLog + "communicate: " + (millis() - ms) + "\n";
 
-  debugLog = debugLog + "total: " + (millis() - ms_tot) + "\n";
+  debugLog = debugLog + String("total: " + String(millis() - ms_tot) + "\n");
+  debugLog = debugLog + String("manualCommand 2: " + manualCommand + "\n");
 
-  ms = millis();
-  Serial.println(debugLog);
-  Serial.println(String("spedizione stringa: ") + (millis() - ms));
+  //ms = millis();
+  if (manualCommand.length() > 0) {
+    Serial.println(debugLog);
+    //Serial.println(String("spedizione stringa: ") + (millis() - ms));
+  }
+
 }
 
 
-void communicate() {
+String communicate() {
   unsigned long timer = millis();
-  if (btLog.length() == 0 && (timer - lastCommTime) < BT_COMM_DELAY){
-    return;
+  if (btLog.length() == 0 && (timer - lastCommTime) < BT_COMM_DELAY) {
+    return (String());
   }
-  if (btLog.length() > 0){
-      bluetooth.println(btLog);
-      btLog = String();
+  if (btLog.length() > 0) {
+    bluetooth.println(btLog);
+    btLog = String();
   }
+  String stringOne;
   stringOne = String(timer) + ";" + last_dist + ";" + cur_steering + ";" + dir_A + ";"
               + brake_A + ";" + speed_A + ";" + target_speed_A + ";" + current[0] + ";"
               + strategyLock + ";" + strategy + ";" + strategyStart + ";"
               + strategyStep + ";" + strategyStepStart + ";" + lastCommCicles + ";" + lastCommTime;
   bluetooth.println(stringOne);
-  //Serial.print("spedisco BT: ");
-  //Serial.println(millis() - timer);
+  Serial.print(stringOne);
+  Serial.print("spedisco BT: ");
+  Serial.println(millis() - timer);
 
   //timer = millis();
-  stringOne = String();
+  String pool;
   while (bluetooth.available()) {
-    stringOne += char(bluetooth.read());
+    pool += char(bluetooth.read());
   }
+  if (pool.length() != 10) {
+    pool = "";
+  } else if (!(isDigit(pool[1]) && isDigit(pool[2]) && isDigit(pool[3]) &&
+               isDigit(pool[4]) && isDigit(pool[6]) && isDigit(pool[7]) &&
+               isDigit(pool[8]))) {
+    pool = "";
+  }
+
+
+  debugLog = debugLog + String("manualCommand 1: " + manualCommand + "\n");
   //Serial.print("leggo BT: ");
   //Serial.println(millis() - timer);
   lastCommTime = millis();
   lastCommCicles = 0;
+  return pool;
 }
 
 void manualSteer() {
@@ -257,35 +276,39 @@ void manualSpeed() {
 void serialRemote() {
   bool start = startStrategy('M');
   strategyLock = true;
-  int dir = int(stringOne[1]);
+  int dir = int(manualCommand[1]);
   if (dir == 0) {
     reverse();
   } else {
     forward();
   }
-  int speed_ = stringOne.substring(2, 4).toInt();
-  int steer_ = stringOne.substring(4, 6).toInt();
-  int brake = int(stringOne[7]);
-  if(brake==1){
+  int speed_ = manualCommand.substring(2, 5).toInt();
+  int steer_ = manualCommand.substring(5, 8).toInt();
+  int brake = int(manualCommand[7]);
+  if (brake == 1) {
     accelerate(-1);
   } else {
     accelerate(speed_);
   }
   steer(steer_);
+  debugLog = debugLog + "serialRemote: " + speed_ + ";" + steer_ + "\n";
 }
 
 void checkManualStrategy() {
-  if (stringOne.length() > 0) { //
-    switch (stringOne[0]) {
+  debugLog = debugLog + String("manualCommand check: " + manualCommand + "\n");
+  if (manualCommand.length() == 8) {
+    debugLog = debugLog + String("checkManualStrategy_: " + String(manualCommand[0]) + "\n");
+    switch (manualCommand[0]) {
       case 'A':
-        if(strategy=='M'){
+        if (strategy == 'M') {
           strategyLock = false;
         }
       case 'M':
         serialRemote();
     }
-    stringOne = String();
   }
+  manualCommand = "";
+}
 
 //  if (digitalRead(Btn_1) == HIGH && last_btn_1 == LOW && digitalRead(Btn_2) == HIGH && last_btn_2 == LOW) {
 //    if (strategy == 'X') {
@@ -321,8 +344,6 @@ void checkManualStrategy() {
 //    delay(100);
 //  }
 
-
-}
 
 bool startStrategy(char st) {
   if (st == strategy) {
@@ -385,8 +406,8 @@ void brakeAndBack() {
     startstrategyStep('B');
     reverse();
     accelerate(60);
-    
-    if ((millis() - last_brake_and_back_time) > TIME_UNIQUE_MANEUVER){
+
+    if ((millis() - last_brake_and_back_time) > TIME_UNIQUE_MANEUVER) {
       brake_and_back_direction = random(0, 2);
     }
     if (brake_and_back_direction == 1) {
@@ -404,7 +425,7 @@ void brakeAndBack() {
     accelerate(-1);
   }
   if (strategyStep == 'C') { // steering forward
-    if ((t - strategyStepStart) < (TIME_TO_BRAKE/2)) { // let time to brake
+    if ((t - strategyStepStart) < (TIME_TO_BRAKE / 2)) { // let time to brake
       //bluetooth.println("let time to brake ");
       return;
     }
@@ -415,7 +436,7 @@ void brakeAndBack() {
   }
 
   if (strategyStep == 'D') { // steering forward
-    if (last_dist < (DIST_BRAKE/2)){ // the reverse run is not enought, some more back
+    if (last_dist < (DIST_BRAKE / 2)) { // the reverse run is not enought, some more back
       startstrategyStep('A');
       return;
     }
@@ -446,14 +467,14 @@ void steerHalf() {
   if (start) {
     accelerate(100);
     int newdir;
-    if (cur_steering==0){ // going straight
+    if (cur_steering == 0) { // going straight
       newdir = random(0, 2); // choose a random direction
-    } else if(cur_steering > 0){ // yet steering (full)
-      newdir == 1;               // steer half in the same direction 
+    } else if (cur_steering > 0) { // yet steering (full)
+      newdir == 1;               // steer half in the same direction
     } else {
       newdir == 0;
     }
-    
+
     if (newdir == 1) {
       steer(MAX_STEER / 2);
     } else {
@@ -468,14 +489,14 @@ void steerFull() {
   if (start) {
     int newdir;
     accelerate(75);
-    if (cur_steering==0){ // going straight
+    if (cur_steering == 0) { // going straight
       newdir = random(0, 2); // choose a random direction
-    } else if(cur_steering > 0){ // yet steering (half)
-      newdir == 1;               // steer full in the same direction 
+    } else if (cur_steering > 0) { // yet steering (half)
+      newdir == 1;               // steer full in the same direction
     } else {
       newdir == 0;
     }
-    
+
     if (newdir == 1) {
       steer(MAX_STEER);
     } else {
@@ -599,7 +620,7 @@ long checkDistanceNew() {
 //  float ybar=0;
 //  float xybar=0;
 //  float xsqbar=0;
-//  
+//
 //  // calculations required for linear regression
 //  for (int i=0; i<n; i++){
 //    xbar=xbar+x[i];
@@ -611,7 +632,7 @@ long checkDistanceNew() {
 //  ybar=ybar/n;
 //  xybar=xybar/n;
 //  xsqbar=xsqbar/n;
-//  
+//
 //  // simple linear regression algorithm
 //  lrCoef[0]=(xybar-xbar*ybar)/(xsqbar-xbar*xbar);
 //  lrCoef[1]=ybar-lrCoef[0]*xbar;
