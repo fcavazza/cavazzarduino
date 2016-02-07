@@ -94,6 +94,7 @@ class RadarGrid(FloatLayout):
         
 class LeftCommands(BoxLayout):
     lbl_port = ObjectProperty(None)
+    lbl_command = ObjectProperty(None)
     lbl_log = ObjectProperty(None)
 
 class AutopilotPage(BoxLayout):
@@ -118,14 +119,15 @@ class AutopilotApp(App):
     lastCommTime = NumericProperty(0)
     auto = StringProperty('normal')
     loglines_text = StringProperty()
+    last_command = StringProperty()
+    port = StringProperty()
     
     def __init__(self, *args, **kwargs):
         super(AutopilotApp, self).__init__(*args, **kwargs)
-        self.port = None
         self.serial = None
         self.lastConnectionAttempt = 0
         self.loglines = deque(maxlen=12)
-        self.segno = 1
+        #self.segno = 1
         
     def build(self):
         radar = AutopilotPage()
@@ -163,20 +165,20 @@ class AutopilotApp(App):
         if time.time() - self.lastConnectionAttempt < 1: return self.port
         self.lastConnectionAttempt = time.time()
         self.log('provo a connettere Arduino')
-        #port = [p for p in comports() if TARGET_ARDUINO in p[2]]
-        port = [p for p in comports() if 'HC-06' in p[0]]
+        port = [p for p in comports() if TARGET_ARDUINO in p[2]]
+        #port = [p for p in comports() if 'HC-06' in p[0]]
         # get the right port based on the SN of target arduino
         if port:
             self.port = port[0][0] 
             try:
-                self.serial = serial.Serial(self.port, 115200, timeout=1)
+                self.serial = serial.Serial(self.port, 57600, timeout=1)
                 self.log('Arduino connesso su porta %s' % self.port)
             except:
                 self.log('Errore di connessione su porta %s' % self.port)
                 pass
             
         else:
-            self.port = None
+            self.port = 'ND'
             self.serial = None
             self.log('non trovato Arduino')
             
@@ -188,28 +190,37 @@ class AutopilotApp(App):
             self.connectArduino()
             return
         line = self.serial.readline()
-        print "letto: " + line
+        print "letto: %s" % line
         if not line:
             return
         if line.startswith('#'):
             self.log(line)
             return
-        if True:
+        try:
             self.readArduinoData(line)
-        #except:
-        #    self.log('** transmission error **')
+        except:
+            self.log('** transmission error **')
         #angle, dist = [int(v) for v in line.split(';')]
         #self.radarGrid.updateTarget(angle, dist)
 
     def writeArduino(self):
-        if not self.serial: return
         if self.auto_mode:
-            self.serial.write('A')
+            cmd = 'A'
         else:
-            cmd = str('M%i%03i%+03i%i\n' % (self.dir_A, 
+            cmd = str('M%i%03i%+03i%i' % (self.dir_A, 
                     self.target_speed_A, self.cur_steering, self.brake_A))
-            print cmd
-            self.serial.write(cmd)
+        
+        self.sendBTArduino(cmd)
+        
+    def sendBTArduino(self, cmd):
+        if not self.serial: return
+        checksum = 0
+        for el in cmd:
+            checksum ^= ord(el)
+        cmd = '%s%s\n' % (chr(checksum), cmd)
+        self.serial.write(cmd)
+        print "scritto: %s" % cmd
+        self.last_command = cmd
 
 
     def update(self, dt):
@@ -225,7 +236,7 @@ class AutopilotApp(App):
         
     def log(self, txt):
         print txt
-        self.loglines.append(str(txt))
+        self.loglines.append(unicode(txt, 'latin-1','ignore'))
         self.loglines_text = '\n'.join(self.loglines)
         #self.leftCommands.lbl_log.text = '\n'.join(self.loglines)
 

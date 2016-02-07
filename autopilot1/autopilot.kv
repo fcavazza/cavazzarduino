@@ -14,6 +14,7 @@
 <LeftCommands>:
     lbl_port: port
     lbl_log: log
+    lbl_command: command
     orientation: 'vertical'
     GridLayout:
         cols: 3
@@ -59,9 +60,17 @@
         size_hint: 1, None
         heigth: 20
         font_size: 15  
-        text: "arduino port"
+        text: app.port
         text_size: self.size
 
+    Label:
+        id: command
+        size_hint: 1, None
+        heigth: 20
+        font_size: 15  
+        text: app.last_command
+        text_size: self.size
+        
     Label:
         id: log
         size_hint: 1, 1
@@ -80,7 +89,7 @@
             size_hint: 0.5, 1
             text: "Brake"
             state: "down" if app.brake_A else "normal"
-            on_state: app.brake_A = args[1]
+            on_state: app.brake_A = 1 if args[1]=="down" else 0
         ToggleButton:
             size_hint: 0.5, 1
             text: "Auto"
@@ -92,8 +101,8 @@
         Slider:
             id: slider_steer
             orientation: 'horizontal'
-            max: 90
-            min: -90
+            max: 55
+            min: -55
             value: app.cur_steering
             on_value: app.cur_steering = args[1]
             size_hint: 1, 1

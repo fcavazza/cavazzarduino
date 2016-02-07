@@ -1,8 +1,9 @@
 #include <Servo.h>
 #include <NewPing.h>
 #include <SoftwareSerial.h>
+#include <Average.h>
 
-#define DEBUG_NO_MOTOR true
+#define DEBUG_NO_MOTOR false
 
 #define A_motor_pwm 3
 #define A_motor_brake 9
@@ -26,7 +27,7 @@
 
 #define MILLIS_SPEED_CHANGE 100 // accelerate every x millis, to let last acceleration have effect
 #define STEP_SPEED_CHANGE 10 // how much acceleration for each step
-#define MIN_SPEED 30 // minimum speed for motor to move
+#define MIN_SPEED 40 // minimum speed for motor to move
 #define TIME_TO_BRAKE 2000 // time to stop from top speed
 
 #define CURRENT_TO_MA 2.96 // 2A at 3.3 volt: convert analog read to mA 
@@ -39,11 +40,12 @@
 #define BT_TX A4
 #define TIME_UNIQUE_MANEUVER 5000 //if less than 5 seconds from last maneuver, it is an unique maneuver
 
-#define BT_COMM_DELAY 10 // bluetooth communication frequency
+#define BT_COMM_DELAY 200 // bluetooth communication frequency
+#define DIST_SENSOR_DELAY 10 // bluetooth communication frequency
 
 #define DIST_HALF_STEER 100
-#define DIST_FULL_STEER 100
-#define DIST_BRAKE 100
+#define DIST_FULL_STEER 50
+#define DIST_BRAKE 20
 
 int last_brake = 0;
 int last_curr = 0;
@@ -60,7 +62,7 @@ int target_speed_A = 0;
 unsigned long last_speed_change; // time since strategy start
 
 int cur_steering = 0;
-long last_dist;
+int last_dist;
 long last_dist_check = millis();
 
 long last_brake_and_back_time;
@@ -87,9 +89,12 @@ String manualCommand;
 String debugLog;
 String btLog;
 
+Average<int> distMem(5);
+
+
 void setup() {
   Serial.begin( 250000 );
-  bluetooth.begin( 115200); //set baud rate
+  bluetooth.begin( 57600); //set baud rate
 
   // put your setup code here, to run once:
   pinMode(A_motor_pwm, OUTPUT);
@@ -154,6 +159,7 @@ void loop() {
       goAhead();
     }
     else if (dist < DIST_BRAKE) { // emergency brake
+      btLog = btLog + "# emergency brake\n";
       brakeAndBack();
     } else if (dist < DIST_FULL_STEER) { // full steer
       steerFull();
@@ -214,7 +220,7 @@ void loop() {
 
 String communicate() {
   unsigned long timer = millis();
-  if (btLog.length() == 0 && (timer - lastCommTime) < BT_COMM_DELAY) {
+  if (btLog.length() == 0 && ((timer - lastCommTime) < BT_COMM_DELAY)) {
     return (String());
   }
   if (btLog.length() > 0) {
@@ -236,21 +242,29 @@ String communicate() {
   while (bluetooth.available()) {
     pool += char(bluetooth.read());
   }
-  if (pool.length() != 10) {
-    pool = "";
-  } else if (!(isDigit(pool[1]) && isDigit(pool[2]) && isDigit(pool[3]) &&
-               isDigit(pool[4]) && isDigit(pool[6]) && isDigit(pool[7]) &&
-               isDigit(pool[8]))) {
-    pool = "";
+
+  if (pool != "") {
+    char XORpy = pool[0];
+
+    char XOR = 0;
+    for (int i = 1; i < (pool.length() - 1); i++) {
+      XOR = XOR ^ pool.charAt(i);
+    }
+
+    if (XOR != XORpy) {
+      Serial.println(String("comando sbagliato: ") + XORpy + " - " + XOR + " - " + pool);
+      pool = "";
+    } else {
+      Serial.println(String("checksum ok: ") + XORpy + " - " + XOR);
+    }
   }
 
-
-  debugLog = debugLog + String("manualCommand 1: " + manualCommand + "\n");
+  //debugLog = debugLog + String("manualCommand 1: " + manualCommand + "\n");
   //Serial.print("leggo BT: ");
   //Serial.println(millis() - timer);
   lastCommTime = millis();
   lastCommCicles = 0;
-  return pool;
+  return pool.substring(1);
 }
 
 void manualSteer() {
@@ -284,7 +298,7 @@ void serialRemote() {
   }
   int speed_ = manualCommand.substring(2, 5).toInt();
   int steer_ = manualCommand.substring(5, 8).toInt();
-  int brake = int(manualCommand[7]);
+  int brake = int(manualCommand[9]);
   if (brake == 1) {
     accelerate(-1);
   } else {
@@ -296,17 +310,21 @@ void serialRemote() {
 
 void checkManualStrategy() {
   debugLog = debugLog + String("manualCommand check: " + manualCommand + "\n");
-  if (manualCommand.length() == 8) {
-    debugLog = debugLog + String("checkManualStrategy_: " + String(manualCommand[0]) + "\n");
-    switch (manualCommand[0]) {
-      case 'A':
-        if (strategy == 'M') {
-          strategyLock = false;
-        }
-      case 'M':
-        serialRemote();
-    }
+
+  debugLog = debugLog + String("checkManualStrategy_: " + String(manualCommand[0]) + "\n");
+  switch (manualCommand[0]) {
+    case 'A':
+      if (strategy == 'M') {
+        bluetooth.println("# AUTO");
+        strategyLock = false;
+        goAhead();
+      }
+      break;
+    case 'M':
+      serialRemote();
+      break;
   }
+
   manualCommand = "";
 }
 
