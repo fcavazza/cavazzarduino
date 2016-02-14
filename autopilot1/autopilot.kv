@@ -95,6 +95,10 @@
             text: "Auto"
             state: app.auto
             on_state: app.auto = args[1]
+        ToggleButton:
+            size_hint: 0.5, 1
+            text: "Rec"
+            on_state: app.startRecording(args[1])
         Label:
             size_hint: 0.1, 1
             text: '%i °' % app.cur_steering

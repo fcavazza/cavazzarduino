@@ -24,6 +24,8 @@ from serial.tools.list_ports import comports
 from kivy.core.window import Window
 #Window.clearcolor = (1, 1, 1, 1)
 
+import xlsxwriter
+
 __version__ = '0.0.1'
 
 TARGET_ARDUINO = '55431313338351113152'
@@ -63,10 +65,9 @@ class RadarGrid(FloatLayout):
         if dist > MAX_SENSOR_DISTANCE: return
         angle = angle - 90 # arduino Servo works from 0 to 180 degrees, but circle widget from -90 to 90
         dist =  self.width / 2.0 / MAX_SENSOR_DISTANCE * dist # rescale distance to radar grid
-        print "dist: %.2f" % dist
 
-        if self.targets.get(angle): self.remove_widget(self.targets.pop(angle))
-        self.targets[angle] = RadarPulse(self, angle, dist)
+        #if self.targets.get(angle): self.remove_widget(self.targets.pop(angle))
+        #self.targets[angle] = RadarPulse(self, angle, dist)
         self.add_widget(self.targets[angle])
         
         self.lbl_angle.text = '%.2f' % angle
@@ -127,6 +128,9 @@ class AutopilotApp(App):
         self.serial = None
         self.lastConnectionAttempt = 0
         self.loglines = deque(maxlen=12)
+        self.recording = False
+        self.rec_distance = {}
+        self.rec_status = {}
         #self.segno = 1
         
     def build(self):
@@ -140,7 +144,14 @@ class AutopilotApp(App):
         return self.auto == 'down'
     
     def readArduinoData(self, datastring):
-        d = datastring.split(';')
+        checksum = 0
+        for el in datastring[1:]:
+            checksum ^= ord(el)
+        if chr(checksum) != datastring[0]:
+            self.log('** checksum error: %s - %s' % (chr(checksum), datastring[0]))
+            return
+            #pass
+        d = datastring[1:].split(';')
         millis = int(d[0])
         self.distance = int(d[1])
         if self.auto_mode:
@@ -160,13 +171,31 @@ class AutopilotApp(App):
         self.lastCommCicles = int(d[13])
         lastCommTime = int(d[14])
         self.lastCommTime = millis - lastCommTime
+        if self.recording:
+            self.rec_status[millis] = d
+            for distRec in d[15:-1]:
+                dist, clock = distRec.split(':')
+                self.rec_distance[clock] = dist
+        
+    def writeRecords(self):
+        wb = xlsxwriter.Workbook('arduino_records.xlsx')
+        ws = wb.add_worksheet('recordings')
+        
+        riga = 0
+        
+        #for recDict in (self.rec_status, self.rec_distance):
+        for millis,data in self.rec_distance.items():
+            riga += 1
+            ws.write(riga, 0, millis)
+            ws.write(riga, 1, data)
+        wb.close()
         
     def connectArduino(self):
         if time.time() - self.lastConnectionAttempt < 1: return self.port
         self.lastConnectionAttempt = time.time()
         self.log('provo a connettere Arduino')
-        port = [p for p in comports() if TARGET_ARDUINO in p[2]]
-        #port = [p for p in comports() if 'HC-06' in p[0]]
+        #port = [p for p in comports() if TARGET_ARDUINO in p[2]]
+        port = [p for p in comports() if 'HC-06' in p[0]]
         # get the right port based on the SN of target arduino
         if port:
             self.port = port[0][0] 
@@ -190,16 +219,17 @@ class AutopilotApp(App):
             self.connectArduino()
             return
         line = self.serial.readline()
-        print "letto: %s" % line
+        line = line.strip()
+        print "letto: '%s'" % line
         if not line:
             return
-        if line.startswith('#'):
+        if line.startswith('# '):
             self.log(line)
             return
-        try:
-            self.readArduinoData(line)
-        except:
-            self.log('** transmission error **')
+        #try:
+        self.readArduinoData(line)
+        #except:
+        #    self.log('** transmission error **')
         #angle, dist = [int(v) for v in line.split(';')]
         #self.radarGrid.updateTarget(angle, dist)
 
@@ -239,6 +269,12 @@ class AutopilotApp(App):
         self.loglines.append(unicode(txt, 'latin-1','ignore'))
         self.loglines_text = '\n'.join(self.loglines)
         #self.leftCommands.lbl_log.text = '\n'.join(self.loglines)
+        
+    def startRecording(self, state):
+        self.recording = (state == 'down')
+        if not self.recording and len(self.rec_distance) > 0: # stop recording
+            self.writeRecords()
+            
 
 if __name__ == '__main__':
     AutopilotApp().run()

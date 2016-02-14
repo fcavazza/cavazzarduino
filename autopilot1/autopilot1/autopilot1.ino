@@ -1,7 +1,7 @@
 #include <Servo.h>
 #include <NewPing.h>
 #include <SoftwareSerial.h>
-#include <Average.h>
+#include <RunningMedian.h>
 
 #define DEBUG_NO_MOTOR false
 
@@ -19,7 +19,7 @@
 
 #define Dist_echo 2
 #define Dist_trig 2
-#define max_distance_cm 200
+#define MAX_DISTANCE_CM 500
 
 #define Pot_input A2
 #define Btn_1 7
@@ -28,20 +28,26 @@
 #define MILLIS_SPEED_CHANGE 100 // accelerate every x millis, to let last acceleration have effect
 #define STEP_SPEED_CHANGE 10 // how much acceleration for each step
 #define MIN_SPEED 40 // minimum speed for motor to move
-#define TIME_TO_BRAKE 2000 // time to stop from top speed
+#define TIME_TO_BRAKE 1000 // time to stop from top speed
 
 #define CURRENT_TO_MA 2.96 // 2A at 3.3 volt: convert analog read to mA 
-#define MAX_TORQUE_MA 500 // lego medium motor max torque 300
+#define MAX_TORQUE_MA 330 // lego medium motor max torque 300
 
 #define MAX_STEER 55 // maximum steering angle for servo
-#define STEER_TRIM 25// adjust 0 angle
+#define STEER_TRIM 24// adjust 0 angle
 
 #define BT_RX A5 // bluetooth
 #define BT_TX A4
 #define TIME_UNIQUE_MANEUVER 5000 //if less than 5 seconds from last maneuver, it is an unique maneuver
 
-#define BT_COMM_DELAY 200 // bluetooth communication frequency
-#define DIST_SENSOR_DELAY 10 // bluetooth communication frequency
+#define BT_COMM_DELAY 50 // bluetooth communication frequency
+
+#define DIST_SENSOR_DELAY 20 // read frequency
+#define DIST_SENSOR_NUM 10 // number of observation retained
+#define DIST_SENSOR_CENTRAL 8 // number of observation retained
+
+#define CURR_SENSOR_DELAY 200 // read frequency
+#define CURR_SENSOR_NUM 20 // number of observation retained
 
 #define DIST_HALF_STEER 100
 #define DIST_FULL_STEER 50
@@ -62,14 +68,12 @@ int target_speed_A = 0;
 unsigned long last_speed_change; // time since strategy start
 
 int cur_steering = 0;
-int last_dist;
+float last_dist;
 long last_dist_check = millis();
+long last_curr_check = millis();
 
 long last_brake_and_back_time;
 int brake_and_back_direction;
-
-int current[10];
-
 
 bool strategyLock = false;
 char strategy = 'Z'; // current strategy
@@ -80,16 +84,19 @@ unsigned long strategyStepStart; // time since strategy state start
 unsigned long lastCommCicles = 0; // cicles since last communication
 unsigned long lastCommTime = 0;
 
+bool communicateNow = false;
+
 SoftwareSerial bluetooth(BT_RX, BT_TX);
 
 Servo steering_servo;
-NewPing sonar(Dist_trig, Dist_echo, max_distance_cm);
+NewPing sonar(Dist_trig, Dist_echo, MAX_DISTANCE_CM);
 
 String manualCommand;
-String debugLog;
 String btLog;
 
-Average<int> distMem(5);
+RunningMedian distMem(DIST_SENSOR_NUM);
+RunningMedian sensorclock(DIST_SENSOR_NUM);
+RunningMedian current(CURR_SENSOR_NUM);
 
 
 void setup() {
@@ -123,36 +130,32 @@ void setup() {
 }
 
 void loop() {
-  debugLog = String();
-  //debugLog = debugLog + String("manualCommand 3: " + manualCommand + "\n");
   lastCommCicles += 1;
-  long dist;
+  float dist;
   unsigned long ms = millis();
   unsigned long ms_tot = ms;
-  if ((millis() - last_dist_check) > 100) {
-    dist = checkDistanceNew();
-
-    for (int i = 9; i > 0; i -= 1) {
-      current[i] = current[i - 1];
-    }
-    current[0] = analogRead(A0) * CURRENT_TO_MA;
+  if ((millis() - last_dist_check) > DIST_SENSOR_DELAY) {
+    dist = checkDistanceAvg();
     last_dist_check = millis();
   } else  {
     dist = last_dist;
   }
-  debugLog = debugLog + "dist_check: " + (millis() - ms) + "\n";
-
-  int delta_dist = dist - last_dist;
+  float delta_dist = dist - last_dist;
   last_dist = dist;
+
+  if ((millis() - last_curr_check) > CURR_SENSOR_DELAY) {
+    current.add(analogRead(A0) * CURRENT_TO_MA);
+    last_curr = current.getAverage();
+    last_curr_check = millis();
+  }
 
   //ms = millis();
 
   checkManualStrategy();
-  //debugLog = debugLog + "checkManualStrategy: " + (millis() - ms) + "\n";
 
   //ms = millis();
   if (strategyLock == false) {
-    if (current[0] > MAX_TORQUE_MA) {
+    if (last_curr > MAX_TORQUE_MA) {
       btLog = btLog + "# high current\n";
       brakeAndBack();
     } else if (dist >= DIST_HALF_STEER) { // direction is good
@@ -196,31 +199,23 @@ void loop() {
         break;
     }
   }
-  //debugLog = debugLog + "checkAutoStrategy: " + (millis() - ms) + "\n";
 
   //ms = millis();
   motorLoop();
-  //debugLog = debugLog + "motorLoop: " + (millis() - ms) + "\n";
 
   ms = millis();
   manualCommand = communicate();
-  debugLog = debugLog + "communicate: " + (millis() - ms) + "\n";
-
-  debugLog = debugLog + String("total: " + String(millis() - ms_tot) + "\n");
-  debugLog = debugLog + String("manualCommand 2: " + manualCommand + "\n");
-
-  //ms = millis();
   if (manualCommand.length() > 0) {
-    Serial.println(debugLog);
-    //Serial.println(String("spedizione stringa: ") + (millis() - ms));
+    Serial.println(String("manualCommand: ") + manualCommand + "\n");
+    Serial.println(String("communicate: ") + (millis() - ms) + "\n");
+    Serial.println(String("total: ") + (millis() - ms_tot) + "\n");
   }
-
 }
 
 
 String communicate() {
   unsigned long timer = millis();
-  if (btLog.length() == 0 && ((timer - lastCommTime) < BT_COMM_DELAY)) {
+  if (btLog.length() == 0 && ((timer - lastCommTime) < BT_COMM_DELAY) && (!communicateNow)) {
     return (String());
   }
   if (btLog.length() > 0) {
@@ -229,11 +224,22 @@ String communicate() {
   }
   String stringOne;
   stringOne = String(timer) + ";" + last_dist + ";" + cur_steering + ";" + dir_A + ";"
-              + brake_A + ";" + speed_A + ";" + target_speed_A + ";" + current[0] + ";"
+              + brake_A + ";" + speed_A + ";" + target_speed_A + ";" + last_curr + ";"
               + strategyLock + ";" + strategy + ";" + strategyStart + ";"
-              + strategyStep + ";" + strategyStepStart + ";" + lastCommCicles + ";" + lastCommTime;
+              + strategyStep + ";" + strategyStepStart + ";" + lastCommCicles + ";" + lastCommTime + ";";
+
+  for (byte j = 1; j <= (distMem.getCount() / 2); j++) {
+    stringOne += String(int(distMem.getElement(j))) + ":";
+    stringOne += String(int(sensorclock.getElement(j))) + ";";
+  }
+  char XOR = 0;
+  for (int i = 0; i < (stringOne.length()); i++) {
+    XOR = XOR ^ stringOne.charAt(i);
+  }
+  stringOne = XOR + stringOne;
+
   bluetooth.println(stringOne);
-  Serial.print(stringOne);
+  Serial.println(stringOne);
   Serial.print("spedisco BT: ");
   Serial.println(millis() - timer);
 
@@ -244,26 +250,28 @@ String communicate() {
   }
 
   if (pool != "") {
+    int lastReturn = pool.lastIndexOf('\n', (pool.length() - 2));
+    if (lastReturn > -1) {
+      pool = pool.substring(lastReturn);
+    }
+    pool.trim();
     char XORpy = pool[0];
 
-    char XOR = 0;
-    for (int i = 1; i < (pool.length() - 1); i++) {
+    XOR = 0;
+    for (int i = 1; i < pool.length(); i++) {
       XOR = XOR ^ pool.charAt(i);
     }
 
     if (XOR != XORpy) {
       Serial.println(String("comando sbagliato: ") + XORpy + " - " + XOR + " - " + pool);
       pool = "";
-    } else {
-      Serial.println(String("checksum ok: ") + XORpy + " - " + XOR);
     }
   }
-
-  //debugLog = debugLog + String("manualCommand 1: " + manualCommand + "\n");
   //Serial.print("leggo BT: ");
   //Serial.println(millis() - timer);
   lastCommTime = millis();
   lastCommCicles = 0;
+  communicateNow = false;
   return pool.substring(1);
 }
 
@@ -290,14 +298,18 @@ void manualSpeed() {
 void serialRemote() {
   bool start = startStrategy('M');
   strategyLock = true;
-  int dir = int(manualCommand[1]);
-  if (dir == 0) {
+
+  char dir = manualCommand[1];
+  if (dir == '0') {
     reverse();
   } else {
     forward();
   }
   int speed_ = manualCommand.substring(2, 5).toInt();
+  Serial.println(String("speed_: ") + speed_ + "\n");
   int steer_ = manualCommand.substring(5, 8).toInt();
+  Serial.println(String("steer_: ") + steer_ + "\n");
+
   int brake = int(manualCommand[9]);
   if (brake == 1) {
     accelerate(-1);
@@ -305,13 +317,10 @@ void serialRemote() {
     accelerate(speed_);
   }
   steer(steer_);
-  debugLog = debugLog + "serialRemote: " + speed_ + ";" + steer_ + "\n";
+  Serial.println(String("serialRemote: ") + speed_ + ";" + steer_ + "\n");
 }
 
 void checkManualStrategy() {
-  debugLog = debugLog + String("manualCommand check: " + manualCommand + "\n");
-
-  debugLog = debugLog + String("checkManualStrategy_: " + String(manualCommand[0]) + "\n");
   switch (manualCommand[0]) {
     case 'A':
       if (strategy == 'M') {
@@ -372,6 +381,7 @@ bool startStrategy(char st) {
     strategyStepStart = millis();
     strategyStep = 'Z';
     btLog = btLog + "# New strategy: " + st + " - dist: " + last_dist + "\n";
+    communicateNow = true;
     return true;
   }
 
@@ -440,7 +450,7 @@ void brakeAndBack() {
       return;
     }
     startstrategyStep('C');
-    accelerate(-1);
+    accelerate(0);
   }
   if (strategyStep == 'C') { // steering forward
     if ((t - strategyStepStart) < (TIME_TO_BRAKE / 2)) { // let time to brake
@@ -454,15 +464,13 @@ void brakeAndBack() {
   }
 
   if (strategyStep == 'D') { // steering forward
+    last_brake_and_back_time = millis();
     if (last_dist < (DIST_BRAKE / 2)) { // the reverse run is not enought, some more back
       startstrategyStep('A');
       return;
-    }
-    if (t - strategyStepStart > 2000) { // let time to steer forward
+    } else if (last_dist >= DIST_HALF_STEER) {
       strategyLock = false; // release the lock and auto define a new strategy
-      btLog = btLog + "# strategyLock = false\n";
       goAhead();
-      last_brake_and_back_time = millis();
     }
   }
 
@@ -628,6 +636,17 @@ long checkDistanceNew() {
   //Serial.println(millis() - timer);
   //return d;
 }
+
+float checkDistanceAvg() {
+  float dist =  sonar.ping_cm();
+  if(dist==0){
+    dist = MAX_DISTANCE_CM;
+  }
+  distMem.add(dist);
+  sensorclock.add(millis());
+  return distMem.getAverage(DIST_SENSOR_CENTRAL);
+}
+
 
 //void simpLinReg(float* x, float* y, float* lrCoef, int n){
 //  // pass x and y arrays (pointers), lrCoef pointer, and n.  The lrCoef array is comprised of the slope=lrCoef[0] and intercept=lrCoef[1].  n is length of the x and y arrays.
