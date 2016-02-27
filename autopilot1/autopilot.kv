@@ -6,10 +6,13 @@
 <RadarPulse>:  
     canvas:
         Color:
-            rgb: 1, 0, 0
+            rgb: root.R, root.G, root.B, root.alpha
         Line:
             width: 2.0
-            circle: (self.center_x, self.center_y, self.distance, self.angle - 1, self.angle + 1)
+            circle: (root.radar.center_x, root.radar.y, root.distance, root.angle - 1, root.angle + 1)
+    Label:
+        text: root.modeLabel
+        
 
 <LeftCommands>:
     lbl_port: port
@@ -58,7 +61,7 @@
     Label:
         id: port
         size_hint: 1, None
-        heigth: 20
+        heigth: 10
         font_size: 15  
         text: app.port
         text_size: self.size
@@ -66,7 +69,7 @@
     Label:
         id: command
         size_hint: 1, None
-        heigth: 20
+        heigth: 10
         font_size: 15  
         text: app.last_command
         text_size: self.size
@@ -118,34 +121,37 @@
             rgb: 0, 1, 0
         Line:
             width: 1.0
-            circle: (self.center_x, 120, root.width/2/4*3, -90, 90)
+            circle: (self.center_x, self.y, root.width/2/3*0.2, -90, 90)
         Line:
             width: 1.0
-            circle: (self.center_x,  120, root.width/2/4*2, -90, 90)
+            circle: (self.center_x, self.y, root.width/2/3*0.5, -90, 90)
         Line:
             width: 1.0
-            circle: (self.center_x,  120, root.width/2/4*1, -90, 90)
+            circle: (self.center_x,  self.y, root.width/2/3*1, -90, 90)
         Line:
             width: 1.0
-            circle: (self.center_x,  120, root.width/2, -90, 90)
+            circle: (self.center_x,  self.y, root.width/2/3*2, -90, 90)
         Line:
             width: 1.0
-            points: (self.center_x -root.width/2,  120, self.center_x +root.width/2, 120)
+            circle: (self.center_x,  self.y, root.width/2, -90, 90)
         Line:
             width: 1.0
-            points: (self.center_x,  120, self.center_x, root.width/2 + 120)
+            points: (self.center_x -root.width/2,  self.y, self.center_x +root.width/2, self.y)
         Line:
             width: 1.0
-            points: (self.center_x,  120, self.center_x + root.width/2 * sin(radians(45)), 120 + root.width/2 * cos(radians(45)))
+            points: (self.center_x,  self.y, self.center_x, root.width/2 + self.y)
         Line:
             width: 1.0
-            points: (self.center_x,  120, self.center_x + root.width/2 * sin(radians(-45)), 120 + root.width/2 * cos(radians(-45)))
+            points: (self.center_x,  self.y, self.center_x + root.width/2 * sin(radians(45)), self.y + root.width/2 * cos(radians(45)))
         Line:
             width: 1.0
-            points: (self.center_x,  120, self.center_x + root.width/2 * sin(radians(70)), 120 + root.width/2 * cos(radians(70)))
+            points: (self.center_x,  self.y, self.center_x + root.width/2 * sin(radians(-45)), self.y + root.width/2 * cos(radians(-45)))
         Line:
             width: 1.0
-            points: (self.center_x,  120, self.center_x + root.width/2 * sin(radians(-70)), 120 + root.width/2 * cos(radians(-70)))
+            points: (self.center_x,  self.y, self.center_x + root.width/2 * sin(radians(70)), self.y + root.width/2 * cos(radians(70)))
+        Line:
+            width: 1.0
+            points: (self.center_x,  self.y, self.center_x + root.width/2 * sin(radians(-70)), self.y + root.width/2 * cos(radians(-70)))
         
 
 <AutopilotPage>:
@@ -189,7 +195,7 @@
                 text: 'Last Comm time: %s' % app.lastCommTime
         RadarGrid:
             id: radarGrid
-            size_hint: 1, 1
+            size_hint: 1, 2
     
         BottomCommands:
             id: bottomCommands

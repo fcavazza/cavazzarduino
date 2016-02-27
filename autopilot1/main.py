@@ -26,10 +26,12 @@ from kivy.core.window import Window
 
 import xlsxwriter
 
+import pdb
+
 __version__ = '0.0.1'
 
 TARGET_ARDUINO = '55431313338351113152'
-MAX_SENSOR_DISTANCE = 200
+MAX_SENSOR_DISTANCE = 300
 
 
 
@@ -38,16 +40,54 @@ MAX_SENSOR_DISTANCE = 200
     
     
 class RadarPulse(Widget):
-    def __init__(self, parent, angle, distance, *args, **kwargs):
+    distance = NumericProperty(0)
+    angle = NumericProperty(0)
+    alpha = NumericProperty(0)
+    
+    def __init__(self, parent, angle, distance, mode, alpha=1, *args, **kwargs):
+        print "RadarPulse distance %s" % distance
+        self.radar = parent
+        self.mode = mode
         self.angle = angle
         self.distance = distance
         self.center_x = parent.center_x
-        self.center_y = parent.center_y - parent.width / 2 + 100
-        super(RadarPulse, self).__init__(*args, **kwargs)
+        self.center_y = parent.center_y
         print self.angle
         print self.distance
         print self.center
+        self.R = 0
+        self.G = 0
+        self.B = 0
+        self.alpha = alpha
 
+        if mode == 'raw':
+            self.R = self.G = self.B = 1
+        elif mode == 'median':
+            self.R = 1
+        elif mode == 'avg':
+            self.G = 1
+        elif mode == 'kalman':
+            self.B = 1
+            
+        super(RadarPulse, self).__init__(*args, **kwargs)
+            
+    def setAlpha(self, alpha):
+        self.alpha = alpha
+        
+    @property
+    def modeLabel(self):
+        lbl = ''
+        if self.mode == 'raw':
+            lbl = 'R'
+        elif self.mode == 'median':
+            lbl = '  M'
+        elif self.mode == 'avg':
+            lbl = '    A'
+        elif self.mode == 'kalman':
+            lbl = '      K'
+        return lbl
+            
+            
 class BottomCommands(BoxLayout):
     pass
 
@@ -57,22 +97,41 @@ class RadarGrid(FloatLayout):
     lbl_dist = ObjectProperty(None)
     
     def __init__(self, *args, **kwargs):
-        self.targets = {}
+        self.max_targets = 20
+        #self.targets = deque(maxlen=self.max_targets)
         super(RadarGrid, self).__init__(*args, **kwargs)
+        self.pulses = {}
 
-    def updateTarget(self, angle, dist):
+    def updateTarget(self, mode, angle, dist):
+        print "updateTarget %s" % dist
         if dist < 0: return
-        if dist > MAX_SENSOR_DISTANCE: return
+        if dist > MAX_SENSOR_DISTANCE: dist = MAX_SENSOR_DISTANCE
         angle = angle - 90 # arduino Servo works from 0 to 180 degrees, but circle widget from -90 to 90
+        print "dist =  %s / %s / %s * %s" % (self.width, 2.0, MAX_SENSOR_DISTANCE, dist)
         dist =  self.width / 2.0 / MAX_SENSOR_DISTANCE * dist # rescale distance to radar grid
-
+        print "updateTarget 2 %s" % dist
+        if mode in self.pulses:
+            self.remove_widget(self.pulses.pop(mode))
+        self.pulses[mode] = RadarPulse(self, angle, dist, mode)
+        self.add_widget(self.pulses[mode])
+        
+        #if len(self.targets)==self.max_targets:
+        #    self.remove_widget(self.targets.popleft())
         #if self.targets.get(angle): self.remove_widget(self.targets.pop(angle))
-        #self.targets[angle] = RadarPulse(self, angle, dist)
-        self.add_widget(self.targets[angle])
+        #rp = RadarPulse(self, angle, dist)
+        #self.targets.append(rp)
+        #self.add_widget(rp)
+        #self.updatePulseAlpha()
         
-        self.lbl_angle.text = '%.2f' % angle
-        self.lbl_dist.text = '%.2f' % dist
+        #self.lbl_angle.text = '%.2f' % angle
+        #self.lbl_dist.text = '%.2f' % dist
         
+    #def updatePulseAlpha(self):
+    #    for i, rp in enumerate(self.targets):
+    #        alpha = (self.max_targets-1-i) / (self.max_targets-1)
+    #        rp.setAlpha(alpha)
+            
+            
 #    def on_touch_down_(self, touch):
 #        #if self.lastangle:
 #        #    print self.targets.items()
@@ -131,14 +190,18 @@ class AutopilotApp(App):
         self.recording = False
         self.rec_distance = {}
         self.rec_status = {}
+        self.distanceModes = {}
         #self.segno = 1
         
     def build(self):
-        radar = AutopilotPage()
-        Clock.schedule_interval(self.update, 1.0 / 100.0)
-        self.connectArduino()
-        return radar
+        page = AutopilotPage()
+        Clock.schedule_once(self.startUpdate, 2)
+        self.radarGrid = page.radarGrid
+        return page
         
+    def startUpdate(self, dt):
+        Clock.schedule_interval(self.update, 1.0 / 100.0)
+    
     @property
     def auto_mode(self):
         return self.auto == 'down'
@@ -153,7 +216,7 @@ class AutopilotApp(App):
             #pass
         d = datastring[1:].split(';')
         millis = int(d[0])
-        self.distance = int(d[1])
+        self.distance = float(d[1])
         if self.auto_mode:
             self.cur_steering = int(d[2])
             self.dir_A = int(d[3])
@@ -171,23 +234,27 @@ class AutopilotApp(App):
         self.lastCommCicles = int(d[13])
         lastCommTime = int(d[14])
         self.lastCommTime = millis - lastCommTime
+        self.rec_status[millis] = d
+        for distRec in d[15:-1]:
+            clock, raw, median, avg, kalman = [float(s) for s in distRec.split(':')]
+            self.distanceModes = dict(raw=raw, median=median, avg=avg, kalman=kalman)
         if self.recording:
-            self.rec_status[millis] = d
-            for distRec in d[15:-1]:
-                dist, clock = distRec.split(':')
-                self.rec_distance[clock] = dist
+            self.rec_distance[clock] = self.distanceModes
+
         
     def writeRecords(self):
         wb = xlsxwriter.Workbook('arduino_records.xlsx')
         ws = wb.add_worksheet('recordings')
         
         riga = 0
-        
-        #for recDict in (self.rec_status, self.rec_distance):
+        for i, c in enumerate(('clock', 'raw', 'median', 'avg', 'kalman')):
+            ws.write(riga, i, c)
+
         for millis,data in self.rec_distance.items():
             riga += 1
             ws.write(riga, 0, millis)
-            ws.write(riga, 1, data)
+            for i, c in enumerate(('raw', 'median', 'avg', 'kalman')):
+                ws.write(riga, i+1, data[c])
         wb.close()
         
     def connectArduino(self):
@@ -228,6 +295,9 @@ class AutopilotApp(App):
             return
         #try:
         self.readArduinoData(line)
+        for mode, dist in self.distanceModes.items():
+            self.radarGrid.updateTarget(mode, 90, dist)
+        
         #except:
         #    self.log('** transmission error **')
         #angle, dist = [int(v) for v in line.split(';')]
@@ -256,7 +326,6 @@ class AutopilotApp(App):
     def update(self, dt):
         self.readArduino()
         self.writeArduino()
-        
         #if self.target_speed_A == 100:
         #    self.segno = -1
         #elif self.target_speed_A == 0:

@@ -3,7 +3,7 @@
 #include <SoftwareSerial.h>
 #include <RunningMedian.h>
 
-#define DEBUG_NO_MOTOR false
+#define DEBUG_NO_MOTOR true
 
 #define A_motor_pwm 3
 #define A_motor_brake 9
@@ -21,10 +21,6 @@
 #define Dist_trig 2
 #define MAX_DISTANCE_CM 500
 
-#define Pot_input A2
-#define Btn_1 7
-#define Btn_2 8
-
 #define MILLIS_SPEED_CHANGE 100 // accelerate every x millis, to let last acceleration have effect
 #define STEP_SPEED_CHANGE 10 // how much acceleration for each step
 #define MIN_SPEED 40 // minimum speed for motor to move
@@ -34,31 +30,26 @@
 #define MAX_TORQUE_MA 330 // lego medium motor max torque 300
 
 #define MAX_STEER 55 // maximum steering angle for servo
-#define STEER_TRIM 24// adjust 0 angle
+#define STEER_TRIM 20// adjust 0 angle
 
 #define BT_RX A5 // bluetooth
 #define BT_TX A4
 #define TIME_UNIQUE_MANEUVER 5000 //if less than 5 seconds from last maneuver, it is an unique maneuver
 
-#define BT_COMM_DELAY 50 // bluetooth communication frequency
+#define BT_COMM_DELAY 20 // bluetooth communication frequency
 
-#define DIST_SENSOR_DELAY 20 // read frequency
+#define DIST_SENSOR_DELAY 30 // read frequency
 #define DIST_SENSOR_NUM 10 // number of observation retained
 #define DIST_SENSOR_CENTRAL 8 // number of observation retained
 
 #define CURR_SENSOR_DELAY 200 // read frequency
-#define CURR_SENSOR_NUM 20 // number of observation retained
+#define CURR_SENSOR_NUM 10 // number of observation retained
 
 #define DIST_HALF_STEER 100
 #define DIST_FULL_STEER 50
 #define DIST_BRAKE 20
 
-int last_brake = 0;
 int last_curr = 0;
-
-int last_btn_1 = LOW;
-int last_btn_2 = LOW;
-
 
 int dir_A = HIGH;
 bool brake_A = false;
@@ -89,6 +80,8 @@ bool communicateNow = false;
 SoftwareSerial bluetooth(BT_RX, BT_TX);
 
 Servo steering_servo;
+Servo steering_servo_2;
+
 NewPing sonar(Dist_trig, Dist_echo, MAX_DISTANCE_CM);
 
 String manualCommand;
@@ -98,6 +91,18 @@ RunningMedian distMem(DIST_SENSOR_NUM);
 RunningMedian sensorclock(DIST_SENSOR_NUM);
 RunningMedian current(CURR_SENSOR_NUM);
 
+//RunningMedian distMedian(DIST_SENSOR_NUM);
+//RunningMedian distAvg(DIST_SENSOR_NUM);
+//RunningMedian distKalman(DIST_SENSOR_NUM);
+
+//Kalman variables
+float P = 1.0;
+//float varP = pow(0.01, 2);
+//float varM = pow(0.5, 2);
+float K = 1.0;
+float Kalman = 20.0;
+
+float last_dist_raw;
 
 void setup() {
   Serial.begin( 250000 );
@@ -114,13 +119,8 @@ void setup() {
 
   pinMode(Steering_motor, OUTPUT);
 
-  pinMode(Dist_trig, OUTPUT);
-  pinMode(Dist_echo, INPUT);
-
-  pinMode(Btn_1, INPUT);
-  pinMode(Btn_2, INPUT);
-
   steering_servo.attach(Steering_motor);
+  steering_servo_2.attach(10);
 
   digitalWrite(A_motor_dir, dir_A);
   lastCommCicles = 0;
@@ -148,12 +148,8 @@ void loop() {
     last_curr = current.getAverage();
     last_curr_check = millis();
   }
-
-  //ms = millis();
-
   checkManualStrategy();
 
-  //ms = millis();
   if (strategyLock == false) {
     if (last_curr > MAX_TORQUE_MA) {
       btLog = btLog + "# high current\n";
@@ -188,19 +184,12 @@ void loop() {
       case 'S':
         stopEngine();
         break;
-      case 'X':
-        manualSteer();
-        break;
-      case 'Y':
-        manualSpeed();
-        break;
       case 'M':
         // manual command from bluetooth: do nothing, commands are given in checkManualStrategy
         break;
     }
   }
 
-  //ms = millis();
   motorLoop();
 
   ms = millis();
@@ -222,29 +211,34 @@ String communicate() {
     bluetooth.println(btLog);
     btLog = String();
   }
-  String stringOne;
-  stringOne = String(timer) + ";" + last_dist + ";" + cur_steering + ";" + dir_A + ";"
-              + brake_A + ";" + speed_A + ";" + target_speed_A + ";" + last_curr + ";"
-              + strategyLock + ";" + strategy + ";" + strategyStart + ";"
-              + strategyStep + ";" + strategyStepStart + ";" + lastCommCicles + ";" + lastCommTime + ";";
+  String stringOne = String(timer) + ";" + last_dist + ";" + cur_steering + ";" + dir_A + ";"
+                     + brake_A + ";" + speed_A + ";" + target_speed_A + ";" + last_curr + ";"
+                     + strategyLock + ";" + strategy + ";" + strategyStart + ";"
+                     + strategyStep + ";" + strategyStepStart + ";" + lastCommCicles + ";" + lastCommTime + ";"
+                     + last_dist_check + ":" + last_dist_raw + ":" + distMem.getMedian() + ":" + last_dist + ":" + Kalman + ";";
 
-  for (byte j = 1; j <= (distMem.getCount() / 2); j++) {
-    stringOne += String(int(distMem.getElement(j))) + ":";
-    stringOne += String(int(sensorclock.getElement(j))) + ";";
-  }
+  //  for (byte j = 1; j <= (distMem.getCount()/2); j++) {
+  //    stringOne += String(int(sensorclock.getElement(j))) + ":";
+  //    stringOne += String(int(distMem.getElement(j))) + ":";
+  //    stringOne += String(int(distMedian.getElement(j))) + ":";
+  //    stringOne += String(int(distAvg.getElement(j))) + ":";
+  //    stringOne += String(int(distKalman.getElement(j))) + ";";
+  //  }
+
   char XOR = 0;
   for (int i = 0; i < (stringOne.length()); i++) {
     XOR = XOR ^ stringOne.charAt(i);
   }
-  stringOne = XOR + stringOne;
 
-  bluetooth.println(stringOne);
+  stringOne = String(XOR) + stringOne;
+  Serial.println("inizio");
   Serial.println(stringOne);
+  Serial.println("fine");
+  bluetooth.println(stringOne);
   Serial.print("spedisco BT: ");
   Serial.println(millis() - timer);
 
-  //timer = millis();
-  String pool;
+  String pool = String("");
   while (bluetooth.available()) {
     pool += char(bluetooth.read());
   }
@@ -267,32 +261,16 @@ String communicate() {
       pool = "";
     }
   }
-  //Serial.print("leggo BT: ");
-  //Serial.println(millis() - timer);
   lastCommTime = millis();
   lastCommCicles = 0;
   communicateNow = false;
   return pool.substring(1);
 }
 
-void manualSteer() {
-  bool start = startStrategy('X');
-  strategyLock = true;
-  int steer_ = map(analogRead(Pot_input), 0, 1023, -MAX_STEER, MAX_STEER);
-  if (steer_ != cur_steering) {
-    accelerate(0);
-    steer(steer_);
-  }
-}
-
-void manualSpeed() {
-  bool start = startStrategy('Y');
-  strategyLock = true;
-  int speed_ = map(analogRead(Pot_input), 0, 1023, 0, 100);
-  if (speed_ != target_speed_A) {
-    accelerate(speed_);
-    steer(0);
-  }
+int freeRam () {
+  extern int __heap_start, *__brkval;
+  int v;
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
 }
 
 void serialRemote() {
@@ -333,44 +311,8 @@ void checkManualStrategy() {
       serialRemote();
       break;
   }
-
   manualCommand = "";
 }
-
-//  if (digitalRead(Btn_1) == HIGH && last_btn_1 == LOW && digitalRead(Btn_2) == HIGH && last_btn_2 == LOW) {
-//    if (strategy == 'X') {
-//      strategyLock = false;
-//    } else {
-//      stopEngine();
-//    }
-//  }
-//
-//  if (digitalRead(Btn_1) == HIGH && last_btn_1 == LOW) {
-//    last_btn_1 == HIGH;
-//    if (strategy == 'X') {
-//      strategyLock = false;
-//    } else {
-//      manualSteer();
-//    }
-//  }
-//  if (digitalRead(Btn_1) == LOW) {
-//    last_btn_1 == LOW;
-//    delay(100);
-//  }
-//
-//  if (digitalRead(Btn_2) == HIGH && last_btn_2 == LOW) {
-//    last_btn_2 == HIGH;
-//    if (strategy == 'Y') {
-//      strategyLock = false;
-//    } else {
-//      manualSpeed();
-//    }
-//  }
-//  if (digitalRead(Btn_1) == LOW) {
-//    last_btn_1 == LOW;
-//    delay(100);
-//  }
-
 
 bool startStrategy(char st) {
   if (st == strategy) {
@@ -538,15 +480,15 @@ void steer(int val) { // steer angle from -90 to +90
   if (DEBUG_NO_MOTOR == false) {
     steering_servo.write(val + 90 + STEER_TRIM); // servo need angle from 0 to 180
   }
+  Serial.print("steer: ");
+  Serial.println(val);
+  steering_servo_2.write(val + 90 + STEER_TRIM); // servo need angle from 0 to 180
+
   cur_steering = val;
-  //bluetooth.print("Steering: ");
-  //bluetooth.println(val);
 }
 
 void accelerate(int val) {
   target_speed_A = val; //actually do nothing, just set target speed, motorLoop() will do the work
-  //bluetooth.print("New target motor speed: ");
-  //bluetooth.println(val);
 }
 
 void motorLoop() {
@@ -558,11 +500,9 @@ void motorLoop() {
     digitalWrite(A_motor_brake, 1);
     speed_A = 0;
     brake_A = true;
-    //bluetooth.println("brake");
   } else if (brake_A) { // if not braking, release the brake
     brake_A = false;
     digitalWrite(A_motor_brake, 0);
-    //bluetooth.println("brake release");
   }
   if (target_speed_A < MIN_SPEED) {
     target_speed_A = 0;
@@ -588,90 +528,65 @@ void motorLoop() {
       last_speed_change = millis();
     }
   }
-  //bluetooth.print("motor speed: ");
-  //bluetooth.println(speed_A);
-  //bluetooth.print("motor speed map: ");
-  //bluetooth.println(map(speed_A, 0, 100, 0, 255));
-
-
-}
-
-//long testDistance() {
-//  //porta bassa l'uscita del trigger
-//  digitalWrite(Dist_trig, LOW);
-//
-//  //invia un impulso di 10microsec su trigger
-//  digitalWrite(Dist_trig, HIGH);
-//  delayMicroseconds( 10 );
-//  digitalWrite(Dist_trig, LOW);
-//  long r;
-//  long duration = pulseIn(Dist_echo, HIGH, 38001);
-//  delay(10);
-//  r = 0.034 * duration / 2;
-//  return r;
-//}
-
-//long checkDistance() {
-//  long r1 = testDistance();
-//  long r2 = testDistance();
-//  long r3 = testDistance();
-//  long m = (r1 + r2 + r3) / 3;
-//  if (abs(r1 - m) + abs(r2 - m) + abs(r3 - m) > 60) {
-//    bluetooth.print("anomalia distanza - media: ");
-//    bluetooth.print(m);
-//    bluetooth.print(" - ");
-//    bluetooth.print(r1);
-//    bluetooth.print(", ");
-//    bluetooth.print(r2);
-//    bluetooth.print(", ");
-//    bluetooth.println(r3);
-//  }
-//  return m;
-//}
-
-long checkDistanceNew() {
-  //unsigned long timer = millis();
-  return sonar.convert_cm(sonar.ping_median(5));
-  //Serial.print("leggo sonar: ");
-  //Serial.println(millis() - timer);
-  //return d;
 }
 
 float checkDistanceAvg() {
-  float dist =  sonar.ping_cm();
-  if(dist==0){
-    dist = MAX_DISTANCE_CM;
+  last_dist_raw =  sonar.ping_cm();
+  if (last_dist_raw == 0) {
+    last_dist_raw = MAX_DISTANCE_CM;
   }
-  distMem.add(dist);
-  sensorclock.add(millis());
-  return distMem.getAverage(DIST_SENSOR_CENTRAL);
+  //sensorclock.add(millis());
+  distMem.add(last_dist_raw);
+
+  float varP;
+  float varM;
+  if (last_dist_raw < 100) { // under 1 meters the sensor is quite reliable and in manouver data variance could be high
+    varM = pow(0.1, 2);
+  } else { // over one meter mesurement is not so reliable
+    varM = pow(0.5, 2);
+  }
+  if (cur_steering == 0) { // not steering, variance should be low
+    varP = pow(0.1, 2);
+  } else { // steering, distance could have high variance
+    varP = pow(0.3, 2);
+  }
+
+  // calculate Kalman
+  P = P + varP;
+  K = P / (P + varM);
+  Kalman = K * last_dist_raw + (1 - K) * Kalman;
+  P = (1 - K) * P;
+
+  Serial.println(String("P =") + P + "; varP: " + varP + "; varM:" + varM + "; K:" + K + "; Kalman: " + Kalman);
+
+  return Kalman;
 }
 
+float distLinReg() {
+  //void simpLinReg(float* x, float* y, float* lrCoef, int n){
+  // pass x and y arrays (pointers), lrCoef pointer, and n.  The lrCoef array is comprised of the slope=lrCoef[0] and intercept=lrCoef[1].  n is length of the x and y arrays.
+  // http://en.wikipedia.org/wiki/Simple_linear_regression
+  // http://jwbrooks.blogspot.it/2014/02/arduino-linear-regression-function.html
+  // initialize variables
+  float xbar = 0;
+  float ybar = 0;
+  float xybar = 0;
+  float xsqbar = 0;
 
-//void simpLinReg(float* x, float* y, float* lrCoef, int n){
-//  // pass x and y arrays (pointers), lrCoef pointer, and n.  The lrCoef array is comprised of the slope=lrCoef[0] and intercept=lrCoef[1].  n is length of the x and y arrays.
-//  // http://en.wikipedia.org/wiki/Simple_linear_regression
-//  // http://jwbrooks.blogspot.it/2014/02/arduino-linear-regression-function.html
-//  // initialize variables
-//  float xbar=0;
-//  float ybar=0;
-//  float xybar=0;
-//  float xsqbar=0;
-//
-//  // calculations required for linear regression
-//  for (int i=0; i<n; i++){
-//    xbar=xbar+x[i];
-//    ybar=ybar+y[i];
-//    xybar=xybar+x[i]*y[i];
-//    xsqbar=xsqbar+x[i]*x[i];
-//  }
-//  xbar=xbar/n;
-//  ybar=ybar/n;
-//  xybar=xybar/n;
-//  xsqbar=xsqbar/n;
-//
-//  // simple linear regression algorithm
-//  lrCoef[0]=(xybar-xbar*ybar)/(xsqbar-xbar*xbar);
-//  lrCoef[1]=ybar-lrCoef[0]*xbar;
-//}
+  // calculations required for linear regression
+  for (int i = 0; i < DIST_SENSOR_NUM; i++) {
+    xbar = xbar + sensorclock.getElement(i);
+    ybar = ybar + distMem.getElement(i);
+    xybar = xybar + sensorclock.getElement(i) * distMem.getElement(i);
+    xsqbar = xsqbar + sensorclock.getElement(i) * sensorclock.getElement(i);
+  }
+  xbar = xbar / DIST_SENSOR_NUM;
+  ybar = ybar / DIST_SENSOR_NUM;
+  xybar = xybar / DIST_SENSOR_NUM;
+  xsqbar = xsqbar / DIST_SENSOR_NUM;
+
+  // simple linear regression algorithm
+  return ((xybar - xbar * ybar) / (xsqbar - xbar * xbar));
+  //lrCoef[1]=ybar-lrCoef[0]*xbar;
+}
 
