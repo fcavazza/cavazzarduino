@@ -119,14 +119,22 @@ void setup() {
 
   pinMode(Steering_motor, OUTPUT);
 
-  steering_servo.attach(Steering_motor);
-  steering_servo_2.attach(10);
+  servoAttach();
 
   digitalWrite(A_motor_dir, dir_A);
   lastCommCicles = 0;
   lastCommTime = 0;
   forward();
   stopEngine();
+}
+
+void servoAttach() {
+  steering_servo.attach(Steering_motor);
+  steering_servo_2.attach(10);
+}
+void servoDetach() {
+  steering_servo.detach();
+  steering_servo_2.detach();
 }
 
 void loop() {
@@ -207,7 +215,9 @@ String communicate() {
   if (btLog.length() == 0 && ((timer - lastCommTime) < BT_COMM_DELAY) && (!communicateNow)) {
     return (String());
   }
+  servoDetach();
   if (btLog.length() > 0) {
+
     bluetooth.println(btLog);
     btLog = String();
   }
@@ -242,7 +252,7 @@ String communicate() {
   while (bluetooth.available()) {
     pool += char(bluetooth.read());
   }
-
+  servoAttach();
   if (pool != "") {
     int lastReturn = pool.lastIndexOf('\n', (pool.length() - 2));
     if (lastReturn > -1) {
@@ -302,7 +312,7 @@ void checkManualStrategy() {
   switch (manualCommand[0]) {
     case 'A':
       if (strategy == 'M') {
-        bluetooth.println("# AUTO");
+        btLog = btLog + "# AUTO";
         strategyLock = false;
         goAhead();
       }
